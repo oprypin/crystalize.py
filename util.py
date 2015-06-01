@@ -62,7 +62,7 @@ def parse_c(src):
 
 
 def internal(path):
-    if path == '':
+    if path in ['', '<built-in>']:
         return True
     try:
         return str(Path(path).relative_to(here/'pycparser'))
