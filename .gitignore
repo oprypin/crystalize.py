@@ -1,0 +1,8 @@
+*
+!.gitignore
+!.gitmodules
+!/pycparser
+!README*
+!*.md
+!LICENSE
+!*.py
