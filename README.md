@@ -19,7 +19,6 @@ Very few libraries will work without manually modifying the result, but almost a
 Supports the following top-level declarations:
 
 - Function declarations &rarr; `fun`
-- Function definitions &rarr; `def`; just dumps C code as the function's body
 - Structs (incl. nested) &rarr; `struct`
 - Enums &rarr; `enum`
 - Unions &rarr; `union`
@@ -27,3 +26,8 @@ Supports the following top-level declarations:
 - Constants &rarr; `CONSTANT = ...`
 - Variables &rarr; `$var = ...`
 - Macros &rarr; `CONSTANT = ...`; can be problematic
+- Function definitions &rarr; `def`; just dumps C code as the function's body
+
+---
+
+## [Examples of generated libraries](https://gist.github.com/e4e005e68ca88ea3240f)
