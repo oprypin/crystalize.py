@@ -20,6 +20,33 @@ sys.path.insert(0, str(here/'pycparser'))
 import pycparser, pycparser.c_generator, pycparser.c_ast, pycparser.plyparser
 
 
+
+def to_snake(s):
+    # Change the string into snake_case
+    s = re.sub('[A-Z](?![A-Z0-9_]|$)', lambda m: '_' + m.group(0).lower(), s)
+    s = re.sub('[A-Z]+', lambda m: '_' + m.group(0).lower() + '_', s)
+    s = re.sub('_+', '_', s).strip('_')
+    return s
+
+def to_snake_upper(s):
+    # Change the string into SNAKE_CASE
+    return to_snake(s).upper()
+
+def to_capitals(s):
+    # Change the string into CamelCase
+    s = re.sub(r'_([a-zA-Z])', lambda m: m.group(1).upper(), s)
+    return s[0].upper() + s[1:]
+
+
+# Reserved words in Crystal programming language
+keywords = 'alias and begin break case class def defined do else elsif end ensure false for if in module next nil not or redo rescue retry return self super then true undef unless until when while yield BEGIN END'.split()
+
+def unkeyword(s):
+    if s in keywords:
+        s += '_'
+    return s
+
+
 def err(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
@@ -81,16 +108,16 @@ def _debug(node, skip=False):
             if node.coord.line:
                 rep += ':{}'.format(node.coord.line)
         if skip:
-            indent = ''
+            ind = ''
         else:
             yield rep
-            indent = '    '
+            ind = '    '
         attrs = ((k, getattr(node, k)) for k in node.attr_names)
         for key, val in itertools.chain(attrs, node.children()):
             lines = _debug(val)
-            yield indent + key + ': ' + next(lines)
+            yield ind + key + ': ' + next(lines)
             for line in lines:
-                line = textwrap.indent(line, indent)
+                line = indent(line, ind)
                 yield line
     else:
         yield repr(node)
@@ -103,3 +130,7 @@ def generate_c(ast):
     if isinstance(ast, pycparser.c_ast.Node):
         return pycparser.c_generator.CGenerator().visit(ast)
     return ast
+
+
+def indent(text, prefix):
+    return ''.join(prefix + line for line in text.splitlines(True))

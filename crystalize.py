@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 
 import sys
-import io
-import os, os.path
+import os
 import re
 import textwrap
 import collections
@@ -21,18 +20,14 @@ try:
 except Exception as e: pass
 
 
-try:
-    textwrap.indent
-except AttributeError:
-    def indent(text, prefix):
-        return ''.join(prefix + line for line in text.splitlines(True))
-    textwrap.indent = indent
 
-
+# Path to the header file is the first command line argument
 header = Path(sys.argv[1])
 try:
+    # Include path is the second command line argument
     root = Path(sys.argv[2])
 except IndexError:
+    # Or detect it automatically by searching upwards for a directory named 'include'
     root = header.parent
     if 'include' in root.parts:
         while root.name != 'include':
@@ -43,59 +38,73 @@ os.chdir(str(root))
 
 
 err("================ Preprocessing =================")
+# Call GCC preprocessor
 proc = subprocess.Popen(['gcc', '-E',
-    '-dD', '-undef', '-nostdinc',
-    '-I{}'.format(here/'pycparser'/'utils'/'fake_libc_include'),
+    '-undef',    # Do not predefine any system-specific or GCC-specific macros
+    '-dD',       # Dump all macro definitions, at the end of preprocessing, in addition to normal output
+    '-nostdinc', # Do not search the standard system directories for header files
+    '-I{}'.format(here/'pycparser'/'utils'/'fake_libc_include'), # Add pycparser's fake headers
     '-I{}'.format(root),
     str(header)
 ], stdout=subprocess.PIPE, universal_newlines=True)
-src = proc.communicate()[0]
+src = proc.communicate()[0] # Get stdout
 
 
+# Hack to change all defines into fake constants, so they can be parsed later by pycparser
+# First we need a fake type to distinguish them
 src = '''
 typedef int _DEFINE;
 ''' + src
+# Replace macros without arguments with consts
 src = re.sub(r'^#define ([a-zA-Z_][_a-zA-Z_0-9]*) ([^\n"]+)$', r'const _DEFINE \1 = "\2";', src, flags=re.MULTILINE)
+# Discard the rest
 src = re.sub(r'^#define.*$', r'', src, flags=re.MULTILINE)
-# err(src)
+
+# Uncomment to print the code that will be passed to pycparser
+#err(src)
 
 
 err("=================== Parsing ====================")
 ast = parse_c(src)
-# err(debug(ast, False))
+
+# Uncomment to print the abstract syntax tree produced by pycparser
+#err(debug(ast, False))
 
 
 
-
+# Convenience import to get all the node classes in the namespace
 from pycparser.c_ast import *
 
 err("================= Transforming =================")
 
+# Accumulate code that will be inside the lib statement...
 lib_code = []
+# and after it
 code = []
 
-keywords = 'alias and begin break case class def defined do else elsif end ensure false for if in module next nil not or redo rescue retry return self super then true undef unless until when while yield BEGIN END'.split()
-
+# `lib ...`
 lib_name = 'Lib'
 
+
+# The `rename_` functions accept names that are present in C and return the names that will be used in Crystal code
+
+# Used for variables, arguments, members.
 def rename_identifier(name):
-    name = re.sub('[A-Z](?![A-Z0-9_]|$)', lambda m: '_' + m.group(0).lower(), name)
-    name = re.sub('[A-Z]+', lambda m: '_' + m.group(0).lower() + '_', name)
-    name = re.sub('_+', '_', name).strip('_')
-    if name in keywords:
-        name += '_'
-    return name
+    return unkeyword(to_snake(name))
 
+# Used for constants
 def rename_const(name):
-    return rename_identifier(name).upper()
+    return unkeyword(to_snake_upper(name))
 
+# Used for functions
 def rename_func(name):
     return rename_identifier(name)
 
-def native_type(type):
+# Detects native types and returns their analog in Crystal, or None if it is not a native type
+def native_type(name):
     for match, repl in {
-        r'_*([Uu]?)[Ii]nt([1-9][0-9]*).*': lambda m: m.group(1).upper() + 'Int' + m.group(2),
-        r'_*[Ff]loat([1-9][0-9]*).*': lambda m: 'Float' + m.group(1),
+        r'_*([Uu]?)[Ii]nt([1-9][0-9]*).*': lambda m: m.group(1).upper() + 'Int' + m.group(2), # [U]IntXX
+        r'_*[Ff]loat([1-9][0-9]*).*': lambda m: 'Float' + m.group(1), # FloatXX
         'signed char': 'Int8',
         '(unsigned )?char': 'UInt8',
         '(signed )?short( int)?': 'Int16',
@@ -110,50 +119,64 @@ def native_type(type):
         '(long )?double': 'Float64',
         'size_t|uintptr_t': 'LibC::SizeT',
     }.items():
-        m = re.search('^(?:'+match+')$', type)
+        m = re.search('^(?:'+match+')$', name)
         if m:
             if isinstance(repl, str):
                 return repl
             else:
                 return repl(m)
 
-def rename_type(type, lib=None):
-    r = native_type(type)
-    if r:
-        return r
-    type = re.sub(r'_([a-zA-Z])', lambda m: m.group(1).upper(), type)
-    return type[0].upper() + type[1:]
+def rename_type(name, lib=None):
+    return unkeyword(native_type(name) or to_capitals(name))
 
+# Counter used to name anonymous structs
 anonymous_counter = 0
 def anon():
     global anonymous_counter
     anonymous_counter += 1
     return anonymous_counter
 
+# Recursively turn a type's AST into a Crystal type string
+# This is used for "inline" types, such as variable's type or struct member's type, and not for top-level declarations.
 def make_type(type):
+    # If it's a pointer type
     if isinstance(type, PtrDecl):
+        # If it's a function pointer
         if isinstance(type.type, FuncDecl):
+            # Handle the function declaration in another call
             return make_type(type.type)
+        # Make the rest of the type and add a star at the end, unless it's a Void*-type
         result = make_type(type.type)
         if result not in pointer_types:
             result += '*'
         return result
     
+    # If it's an array type
     if isinstance(type, ArrayDecl):
+        # Make the rest of the type and add brackets at the end, with the value
+        # The value is typically a number, but could be any C code
+        # We just generate C and hope it will be valid Crystal code
         return '{}[{}]'.format(make_type(type.type), generate_c(type.dim.value))
     
+    # If it's a function type
     if isinstance(type, FuncDecl):
         func = type
         func_type = make_type(func.type)
+        # Turn each argument AST into an name:type pair and get just the type
+        # Caveats: func.args may be None; arg may be void due to simplistic parsing of function without arguments
         func_args = [make_arg(arg).type for arg in func.args.params if make_arg(arg)] if func.args else []
-        if func_args:
-            return '({}) -> {}'.format(', '.join(func_args), func_type)
-        else:
-            return '-> {}'.format(func_type)
+        # Form a template (no parentheses needed for 1 arg, skip altogether for 0 args)
+        fmt = ('({args}) -> {type}' if len(func_args) > 1 else '{args} -> {type}') if func_args else '-> {type}'
+        # Fill the template with list of args and return type
+        return fmt.format(args=', '.join(func_args), type=func_type)
     
+    # If it's a misc type declaration
     if isinstance(type, TypeDecl):
+        # If it's a struct
         if isinstance(type.type, Struct) and type.type.decls:
+            # This will be a struct inside a struct, typically anonymous
             struct = type.type
+            # Get the struct's name or generate one
             struct_name = struct.name or 'Anonymous{}'.format(anon())
             output = []
             output.append('struct {}'.format(rename_type(struct_name)))
@@ -161,16 +184,21 @@ def make_type(type):
                 member = make_member(decl)
                 output.append('  {} : {}'.format(member.name, member.type))
             output.append('end')
+            # Immediately add the struct to the lib, and return just its name
+            # This unfolds nested structs
             lib_code.append('\n'.join(output))
             return rename_type(struct_name)
+        # If it's just some normal type, which might consist of multiple components
         try:
             return rename_type(' '.join(type.type.names))
         except AttributeError:
             return rename_type(type.type.name)
     
+    # Don't know what this is. Just paste the C code
     return generate_c(type)
 
-class Argument(collections.namedtuple('Argument', 'name type')):
+# Storage class for a function argument, struct member, etc
+class Item(collections.namedtuple('Item', 'name type')):
     def __str__(self):
         if self.name:
             return '{} : {}'.format(self.name, self.type)
@@ -185,8 +213,8 @@ def make_arg(arg):
                 return None
         except AttributeError:
             pass
-        return Argument(name=None, type=make_type(arg.type))
-    return Argument(
+        return Item(name=None, type=make_type(arg.type))
+    return Item(
         name=rename_identifier(arg.name) if arg.name else None,
         type=make_type(arg.type)
     )
@@ -238,7 +266,7 @@ for top in ast.ext:
             if src.startswith('{') and src.endswith('}'):
                 src = textwrap.dedent(src[1:-1].strip('\n'))
             src = re.sub(r'\n+', r'\n', src)
-            cr_output.append(textwrap.indent(src, '  # '))
+            cr_output.append(indent(src, '  # '))
             cr_output.append('end')
             code.append('\n'.join(cr_output))
         
@@ -313,7 +341,7 @@ for top in ast.ext:
 
 
 print('lib {}'.format(lib_name))
-print(textwrap.indent('\n\n'.join(lib_code), '  '))
+print(indent('\n\n'.join(lib_code), '  '))
 print('end')
 if code:
     print('')
