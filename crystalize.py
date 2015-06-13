@@ -156,7 +156,11 @@ def make_type(type):
         # Make the rest of the type and add brackets at the end, with the value
         # The value is typically a number, but could be any C code
         # We just generate C and hope it will be valid Crystal code
-        return '{}[{}]'.format(make_type(type.type), generate_c(type.dim.value))
+        if type.dim:
+            return '{}[{}]'.format(make_type(type.type), generate_c(type.dim.value))
+        else:
+            # Array without specified dimension
+            return '{}*'.format(make_type(type.type))
     
     # If it's a function type
     if isinstance(type, FuncDecl):
@@ -310,11 +314,12 @@ for top in ast.ext:
                 union, union_name = top.type, top.type.name
             else:
                 union, union_name = top.type.type, top.name
-            output.append('union {}'.format(rename_type(struct_name)))
-            for decl in union.decls:
-                member = make_member(decl)
-                output.append('  {} : {}'.format(rename_identifier(member.name), member.type))
-            output.append('end')
+            if union.decls:
+                output.append('union {}'.format(rename_type(union_name)))
+                for decl in union.decls:
+                    member = make_member(decl)
+                    output.append('  {} : {}'.format(rename_identifier(member.name), member.type))
+                output.append('end')
 
         elif isinstance(top, Typedef):
             output.append('alias {} = {}'.format(rename_type(top.name), make_type(top.type)))
