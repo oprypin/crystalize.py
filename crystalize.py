@@ -68,7 +68,7 @@ err("=================== Parsing ====================")
 ast = parse_c(src)
 
 # Uncomment to print the abstract syntax tree produced by pycparser
-#err(debug(ast, False))
+#err(debug_ast(ast, False))
 
 
 
@@ -168,11 +168,11 @@ def make_type(type):
         func_type = make_type(func.type)
         # Turn each argument AST into an name:type pair and get just the type
         # Caveats: func.args may be None; arg may be void due to simplistic parsing of function without arguments
-        func_args = [make_arg(arg).type for arg in func.args.params if make_arg(arg)] if func.args else []
+        func_args = make_args(func.args)
         # Form a template (no parentheses needed for 1 arg, skip altogether for 0 args)
         fmt = ('({args}) -> {type}' if len(func_args) > 1 else '{args} -> {type}') if func_args else '-> {type}'
         # Fill the template with list of args and return type
-        return fmt.format(args=', '.join(func_args), type=func_type)
+        return fmt.format(args=', '.join(str(arg) for arg in func_args), type=func_type)
     
     # If it's a misc type declaration
     if isinstance(type, TypeDecl):
@@ -208,10 +208,12 @@ class Item(collections.namedtuple('Item', 'name type')):
             return '{} : {}'.format(self.name, self.type)
         else:
             return self.type
+# Process function argument
 def make_arg(arg):
     if isinstance(arg, EllipsisParam):
         return '...'
     if isinstance(arg, Typename):
+        # Just a type, no name
         try:
             if arg.type.type.names == ['void']:
                 return None
@@ -222,24 +224,40 @@ def make_arg(arg):
         name=rename_identifier(arg.name) if arg.name else None,
         type=make_type(arg.type)
     )
+def make_args(args):
+    if not args:
+        # f()
+        return []
+    result = [make_arg(arg) for arg in args.params if make_arg(arg)]
+    if result == [None]:
+        # f(void)
+        return []
+    return result
+    
+# Process struct (etc.) member
 def make_member(member):
+    err(member)
     return make_arg(member)
 
+# Struct typedefs without members will be created as Void*.
+# They can only be used through a pointer, so the pointer will be included in a type and excluded whenever it's used
 pointer_types = set()
 
+# Iterate over top-level declarations
 for top in ast.ext:
     try:
+        # Store output code in a list
         output = []
         
         if top.coord and internal(top.coord.file):
+            # Not part of the lib
             continue
         
+        # Function declaration
         if isinstance(top, Decl) and isinstance(top.type, FuncDecl):
             func = top.type
             func_name = top.name
-            func_args = [make_arg(arg) for arg in func.args.params if make_arg(arg)] if func.args else []
-            if func_args == [None]:
-                func_args = []
+            func_args = make_args(func.args)
             func_type = make_type(func.type)
             
             output.append('fun {} = "{}"({}) : {}'.format(
@@ -248,24 +266,21 @@ for top in ast.ext:
                 func_type
             ))
         
+        # Function definition (with body)
         elif isinstance(top, FuncDef):
             decl, body = top.decl, top.body
             func = decl.type
             func_name = decl.name
-            func_args = [make_arg(arg) for arg in func.args.params if make_arg(arg)] if func.args else []
-            if func_args == [None]:
-                func_args = []
+            func_args = make_args(func.args)
             func_type = make_type(func.type)
             
             cr_output = []
             cr_output.append('def {}({}) : {}'.format(
                 rename_func(func_name),
-                ', '.join(
-                    '{} : {}::{}'.format(arg.name, lib_name, arg.type)
-                    for arg in func_args
-                ),
+                ', '.join(str(arg) for arg in func_args),
                 func_type
             ))
+            # Re-generate the function body C code and just plop it in there, commented out
             src = generate_c(body).strip('\n')
             if src.startswith('{') and src.endswith('}'):
                 src = textwrap.dedent(src[1:-1].strip('\n'))
@@ -274,11 +289,14 @@ for top in ast.ext:
             cr_output.append('end')
             code.append('\n'.join(cr_output))
         
+        # Struct
         elif isinstance(top, Decl) and isinstance(top.type, Struct) or\
           isinstance(top, Typedef) and isinstance(top.type.type, Struct):
             if isinstance(top, Decl):
+                # struct T {
                 struct, struct_name = top.type, top.type.name
             else:
+                # typedef struct {
                 struct, struct_name = top.type.type, top.name
             if struct.decls:
                 output.append('struct {}'.format(rename_type(struct_name)))
@@ -287,14 +305,18 @@ for top in ast.ext:
                     output.append('  {} : {}'.format(member.name, member.type))
                 output.append('end')
             else:
+                # Empty struct or just a forward declaration
                 output.append('type {} = Void*'.format(rename_type(struct_name)))
                 pointer_types.add(rename_type(struct_name))
         
+        # Enum
         elif isinstance(top, Decl) and isinstance(top.type, Enum) or\
           isinstance(top, Typedef) and isinstance(top.type.type, Enum):
             if isinstance(top, Decl):
+                # enum T {
                 enum, enum_name = top.type, top.type.name
             else:
+                # typedef enum {
                 enum, enum_name = top.type.type, top.name
             if enum_name:
                 output.append('enum {}'.format(rename_type(enum_name)))
@@ -305,14 +327,18 @@ for top in ast.ext:
                         output.append('  {}'.format(rename_const(item.name)))
                 output.append('end')
             else:
+                # Anonymous enum; just output constants
                 for item in enum.values.enumerators:
                     output.append('  {} = {}'.format(rename_const(item.name), generate_c(item.value)))
         
+        # Union
         elif isinstance(top, Decl) and isinstance(top.type, Union) or\
           isinstance(top, Typedef) and isinstance(top.type.type, Union):
             if isinstance(top, Decl):
+                # union T{
                 union, union_name = top.type, top.type.name
             else:
+                # typedef union {
                 union, union_name = top.type.type, top.name
             if union.decls:
                 output.append('union {}'.format(rename_type(union_name)))
@@ -320,17 +346,21 @@ for top in ast.ext:
                     member = make_member(decl)
                     output.append('  {} : {}'.format(rename_identifier(member.name), member.type))
                 output.append('end')
-
+        
+        # Typedef
         elif isinstance(top, Typedef):
             output.append('alias {} = {}'.format(rename_type(top.name), make_type(top.type)))
         
+        # Const
         elif isinstance(top, Decl) and top.quals == ['const']:
             val = generate_c(top.init)
             if top.init:
                 output.append('{} = {}'.format(rename_const(top.name), val.strip('"')))
             else:
+                # Empty define
                 output.append('#{} ='.format(rename_const(top.name)))
         
+        # Global variable
         elif isinstance(top, Decl):
             output.append('${} : {}'.format(rename_identifier(top.name), make_type(top.type)))
         
@@ -340,7 +370,7 @@ for top in ast.ext:
         if output:
             lib_code.append('\n'.join(output))
     except Exception as e:
-        err(debug(top))
+        err(debug_ast(top))
         err(debug_source_ast(top))
         raise
 

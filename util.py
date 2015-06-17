@@ -42,29 +42,32 @@ def to_capitals(s):
 keywords = 'alias and begin break case class def defined do else elsif end ensure false for if in module next nil not or redo rescue retry return self super then true undef unless until when while yield BEGIN END'.split()
 
 def unkeyword(s):
-    if s in keywords:
+    # Add an underscore so the name is not a reserved word
+    while s in keywords:
         s += '_'
     return s
 
 
 def err(*args, **kwargs):
+    # Print to stderr
     print(*args, file=sys.stderr, **kwargs)
 
 
 def debug_source(path, line_start, line_end=None):
+    # Output relevant source code
     with io.open(str(path)) as f:
         lines = list(enumerate(f, 1))
+    real_line_end = line_end
     if line_end is None:
         line_end = line_start+4
         real_line_end = line_start
-    else:
-        real_line_end = line_end
     return ''.join(
         str(i) + (':' if line_start <= i <= real_line_end else ' ') + '\t' + l
         for i, l in lines[line_start-1-1:line_end+1]
     ).strip('\n')
 
 def debug_source_ast(ast):
+    # Output relevant source code (determine file and lines from AST)
     lines = []
     class Visitor(pycparser.c_ast.NodeVisitor):
         def visit(self, node):
@@ -76,6 +79,7 @@ def debug_source_ast(ast):
 
 
 def parse_c(src):
+    # Parse C source code into AST
     try:
         return pycparser.CParser().parse(src)
     except pycparser.plyparser.ParseError as e:
@@ -89,6 +93,7 @@ def parse_c(src):
 
 
 def internal(path):
+    # Check if this source file is internal or part of the library
     if path in ['', '<built-in>']:
         return True
     try:
@@ -97,7 +102,11 @@ def internal(path):
         return False
 
 
-def _debug(node, skip=False):
+def debug_ast(node, top=True):
+    # Pretty print an AST
+    return '\n'.join(_debug_ast(node, not top))
+
+def _debug_ast(node, skip=False):
     if isinstance(node, pycparser.c_ast.Node):
         rep = type(node).__name__
         if node.coord:
@@ -114,7 +123,7 @@ def _debug(node, skip=False):
             ind = '    '
         attrs = ((k, getattr(node, k)) for k in node.attr_names)
         for key, val in itertools.chain(attrs, node.children()):
-            lines = _debug(val)
+            lines = _debug_ast(val)
             yield ind + key + ': ' + next(lines)
             for line in lines:
                 line = indent(line, ind)
@@ -122,15 +131,15 @@ def _debug(node, skip=False):
     else:
         yield repr(node)
 
-def debug(node, top=True):
-    return '\n'.join(_debug(node, not top))
 
 
 def generate_c(ast):
+    # Generate C code from AST
     if isinstance(ast, pycparser.c_ast.Node):
         return pycparser.c_generator.CGenerator().visit(ast)
     return ast
 
 
 def indent(text, prefix):
+    # Prepend prefix to every line of text
     return ''.join(prefix + line for line in text.splitlines(True))
