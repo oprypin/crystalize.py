@@ -147,7 +147,7 @@ def make_type(type):
             return make_type(type.type)
         # Make the rest of the type and add a star at the end, unless it's a Void*-type
         result = make_type(type.type)
-        if result not in pointer_types:
+        if not is_pointer_type(result):
             result += '*'
         return result
     
@@ -236,12 +236,21 @@ def make_args(args):
     
 # Process struct (etc.) member
 def make_member(member):
-    err(member)
     return make_arg(member)
 
 # Struct typedefs without members will be created as Void*.
 # They can only be used through a pointer, so the pointer will be included in a type and excluded whenever it's used
 pointer_types = set()
+# However, a forward declaration doesn't mean it will remain without a definition
+# So we do a preliminary pass to find all structs with members; they definitely can't be pointer types
+non_pointer_types = {
+    rename_type(top.type.name)
+    for top in ast.ext
+    if isinstance(top, Decl) and isinstance(top.type, Struct) and top.type.decls
+}
+
+def is_pointer_type(type):
+    return type not in non_pointer_types and type in pointer_types
 
 # Iterate over top-level declarations
 for top in ast.ext:
