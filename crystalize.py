@@ -250,7 +250,10 @@ non_pointer_types = {
 }
 
 def is_pointer_type(type):
-    return type not in non_pointer_types and type in pointer_types
+    if type in non_pointer_types:
+        return False
+    if type in pointer_types:
+        return True
 
 # Iterate over top-level declarations
 for top in ast.ext:
@@ -315,8 +318,10 @@ for top in ast.ext:
                 output.append('end')
             else:
                 # Empty struct or just a forward declaration
-                output.append('type {} = Void*'.format(rename_type(struct_name)))
-                pointer_types.add(rename_type(struct_name))
+                if is_pointer_type(rename_type(struct_name)) is not False:
+                    # Strictly False means there is a full declaration, so this is not needed
+                    output.append('type {} = Void*'.format(rename_type(struct_name)))
+                    pointer_types.add(rename_type(struct_name))
         
         # Enum
         elif isinstance(top, Decl) and isinstance(top.type, Enum) or\
@@ -327,18 +332,20 @@ for top in ast.ext:
             else:
                 # typedef enum {
                 enum, enum_name = top.type.type, top.name
-            if enum_name:
-                output.append('enum {}'.format(rename_type(enum_name)))
-                for item in enum.values.enumerators:
-                    if item.value:
+            if enum.values:
+                # Non-empty enum
+                if enum_name:
+                    output.append('enum {}'.format(rename_type(enum_name)))
+                    for item in enum.values.enumerators:
+                        if item.value:
+                            output.append('  {} = {}'.format(rename_const(item.name), generate_c(item.value)))
+                        else:
+                            output.append('  {}'.format(rename_const(item.name)))
+                    output.append('end')
+                else:
+                    # Anonymous enum; just output constants
+                    for item in enum.values.enumerators:
                         output.append('  {} = {}'.format(rename_const(item.name), generate_c(item.value)))
-                    else:
-                        output.append('  {}'.format(rename_const(item.name)))
-                output.append('end')
-            else:
-                # Anonymous enum; just output constants
-                for item in enum.values.enumerators:
-                    output.append('  {} = {}'.format(rename_const(item.name), generate_c(item.value)))
         
         # Union
         elif isinstance(top, Decl) and isinstance(top.type, Union) or\
@@ -350,6 +357,7 @@ for top in ast.ext:
                 # typedef union {
                 union, union_name = top.type.type, top.name
             if union.decls:
+                # Non-empty union
                 output.append('union {}'.format(rename_type(union_name)))
                 for decl in union.decls:
                     member = make_member(decl)
