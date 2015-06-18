@@ -172,7 +172,7 @@ def make_type(type):
         # Form a template (no parentheses needed for 1 arg, skip altogether for 0 args)
         fmt = ('({args}) -> {type}' if len(func_args) > 1 else '{args} -> {type}') if func_args else '-> {type}'
         # Fill the template with list of args and return type
-        return fmt.format(args=', '.join(str(arg) for arg in func_args), type=func_type)
+        return fmt.format(args=', '.join(arg.type for arg in func_args), type=func_type)
     
     # If it's a misc type declaration
     if isinstance(type, TypeDecl):
