@@ -37,13 +37,17 @@ header = header.relative_to(root)
 os.chdir(str(root))
 
 
+fake_headers_path = here/'pycparser'/'utils'/'fake_libc_include'
+if not fake_headers_path.is_dir():
+    err("Missing {}. This will cause problems.".format(fake_headers_path))
+
 err("================ Preprocessing =================")
 # Call GCC preprocessor
 proc = subprocess.Popen(['gcc', '-E',
     '-undef',    # Do not predefine any system-specific or GCC-specific macros
     '-dD',       # Dump all macro definitions, at the end of preprocessing, in addition to normal output
     '-nostdinc', # Do not search the standard system directories for header files
-    '-I{}'.format(here/'pycparser'/'utils'/'fake_libc_include'), # Add pycparser's fake headers
+    '-I{}'.format(fake_headers_path), # Add pycparser's fake headers
     '-I{}'.format(root),
     str(header)
 ], stdout=subprocess.PIPE, universal_newlines=True)
