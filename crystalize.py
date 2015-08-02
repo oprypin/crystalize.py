@@ -6,6 +6,7 @@ import re
 import textwrap
 import collections
 import subprocess
+import ast
 from pathlib import Path
 
 from util import *
@@ -60,7 +61,11 @@ src = '''
 typedef int _DEFINE;
 ''' + src
 # Replace macros without arguments with consts
-src = re.sub(r'^#define ([a-zA-Z_][_a-zA-Z_0-9]*) ([^\n"]+)$', r'const _DEFINE \1 = "\2";', src, flags=re.MULTILINE)
+src = re.sub(
+    r'^#define +([a-zA-Z_][_a-zA-Z_0-9]*) +([^\n]+)$',
+    lambda m: 'const _DEFINE {} = "{}";'.format(m.group(1), m.group(2).replace('\\', '\\\\').replace('"', '\\"')),
+    src, flags=re.MULTILINE
+)
 # Discard the rest
 src = re.sub(r'^#define.*$', r'', src, flags=re.MULTILINE)
 
@@ -69,10 +74,10 @@ src = re.sub(r'^#define.*$', r'', src, flags=re.MULTILINE)
 
 
 err("=================== Parsing ====================")
-ast = parse_c(src)
+c_ast = parse_c(src)
 
 # Uncomment to print the abstract syntax tree produced by pycparser
-#err(debug_ast(ast, False))
+#err(debug_ast(c_ast, False))
 
 
 
@@ -249,7 +254,7 @@ pointer_types = set()
 # So we do a preliminary pass to find all structs with members; they definitely can't be pointer types
 non_pointer_types = {
     rename_type(top.type.name)
-    for top in ast.ext
+    for top in c_ast.ext
     if isinstance(top, Decl) and isinstance(top.type, Struct) and top.type.decls
 }
 
@@ -260,7 +265,7 @@ def is_pointer_type(type):
         return True
 
 # Iterate over top-level declarations
-for top in ast.ext:
+for top in c_ast.ext:
     try:
         # Store output code in a list
         output = []
@@ -376,7 +381,10 @@ for top in ast.ext:
         elif isinstance(top, Decl) and top.quals == ['const']:
             val = generate_c(top.init)
             if top.init:
-                output.append('{} = {}'.format(rename_const(top.name), val.strip('"')))
+                val = top.init.value
+                if ' '.join(top.type.type.names) == '_DEFINE':
+                    val = ast.literal_eval(val)
+                output.append('{} = {}'.format(rename_const(top.name), val))
             else:
                 # Empty define
                 output.append('#{} ='.format(rename_const(top.name)))
