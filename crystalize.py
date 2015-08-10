@@ -156,7 +156,7 @@ def make_type(type):
             return make_type(type.type)
         # Make the rest of the type and add a star at the end, unless it's a Void*-type
         result = make_type(type.type)
-        if not is_pointer_type(result):
+        if not is_pointer_type(result) or isinstance(type.type, PtrDecl):
             result += '*'
         return result
     
