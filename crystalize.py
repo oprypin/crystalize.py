@@ -62,12 +62,32 @@ typedef int _DEFINE;
 ''' + src
 # Replace macros without arguments with consts
 src = re.sub(
-    r'^#define +([a-zA-Z_][_a-zA-Z_0-9]*) +([^\n]+)$',
+    r'^[ \t]*#define +([a-zA-Z_][_a-zA-Z_0-9]*) +(.+)$',
     lambda m: 'const _DEFINE {} = "{}";'.format(m.group(1), m.group(2).replace('\\', '\\\\').replace('"', '\\"')),
     src, flags=re.MULTILINE
 )
 # Discard the rest
-src = re.sub(r'^#define.*$', r'', src, flags=re.MULTILINE)
+src = re.sub(r'^[ \t]*#(define|undef).*$', r'', src, flags=re.MULTILINE)
+
+# Discard #if...
+lines = []
+writing = True
+for line in src.splitlines():
+    if re.search(r'^[ \t]*#if(n)?.*(!)?', line):
+        writing = bool(m.group(1) or m.group(2))
+        lines.append('')
+    elif re.search(r'^[ \t]*#el', line):
+        writing = not writing
+        lines.append('')
+    elif re.search(r'^[ \t]*#end', line):
+        writing = True
+        lines.append('')
+    else:
+        lines.append(line if writing else '')
+src = '\n'.join(lines)
+
+# Discard attributes
+src = re.sub(r'__attribute__[ \t]*\(\(.+\)\)', '', src)
 
 # Uncomment to print the code that will be passed to pycparser
 #err(src)
