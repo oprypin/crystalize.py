@@ -210,13 +210,16 @@ def make_type(type):
     # If it's a misc type declaration
     if isinstance(type, TypeDecl):
         # If it's a struct
-        if isinstance(type.type, Struct) and type.type.decls:
+        if isinstance(type.type, (Struct, Union)) and type.type.decls:
             # This will be a struct inside a struct, typically anonymous
             struct = type.type
             # Get the struct's name or generate one
             struct_name = struct.name or 'Anonymous{}'.format(anon())
             output = []
-            output.append('struct {}'.format(rename_type(struct_name)))
+            output.append('{} {}'.format(
+                'struct' if isinstance(type.type, Struct) else 'union',
+                rename_type(struct_name)
+            ))
             for decl in struct.decls:
                 member = make_member(decl)
                 output.append('  {} : {}'.format(member.name, member.type))
