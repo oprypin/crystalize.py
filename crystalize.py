@@ -406,15 +406,12 @@ for top in c_ast.ext:
         
         # Const
         elif isinstance(top, Decl) and top.quals == ['const']:
-            val = generate_c(top.init)
+            val = ''
             if top.init:
                 val = top.init.value
                 if ' '.join(top.type.type.names) == '_DEFINE':
                     val = ast.literal_eval(val)
-                output.append('{} = {}'.format(rename_const(top.name), val))
-            else:
-                # Empty define
-                output.append('#{} ='.format(rename_const(top.name)))
+            output.append('{}{} = {}'.format('' if val else '#', rename_const(top.name), val))
         
         # Global variable
         elif isinstance(top, Decl):
