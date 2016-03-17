@@ -114,21 +114,25 @@ def native_type(name):
     for match, repl in {
         r'_*([Uu]?)[Ii]nt([1-9][0-9]*).*': lambda m: m.group(1).upper() + 'Int' + m.group(2), # [U]IntXX
         r'_*[Ff]loat([1-9][0-9]*).*': lambda m: 'Float' + m.group(1), # FloatXX
-        'signed char': 'Int8',
-        '(unsigned )?char': 'UInt8',
-        '(signed )?short( int)?': 'Int16',
-        'unsigned short( int)?': 'UInt16',
-        '(signed )?int': 'Int32',
-        'unsigned( int)?': 'UInt32',
-        '(signed )?long( int)?': 'LibC::LongT',
-        'unsigned long( int)?': 'LibC::LongT',
-        '(signed )?long long( int)?': 'Int64',
-        'unsigned long long( int)?': 'UInt64',
-        'float': 'Float32',
-        '(long )?double': 'Float64',
+        'signed char': 'LibC::SChar',
+        '(unsigned )?char': 'LibC::Char',
+        '(signed )?short( int)?': 'LibC::Short',
+        'unsigned short( int)?': 'LibC::UShort',
+        '(signed )?int': 'LibC::Int',
+        'unsigned( int)?': 'LibC::UInt',
+        '(signed )?long( int)?': 'LibC::Long',
+        'unsigned long( int)?': 'LibC::ULong',
+        '(signed )?long long( int)?': 'LibC::LongLong',
+        'unsigned long long( int)?': 'LibC::ULongLong',
+        'float': 'LibC::Float',
+        '(long )?double': 'LibC::Double',
         'size_t|uintptr_t': 'LibC::SizeT',
+        'ptrdiff_t|offset_t': 'LibC::PtrDiffT',
     }.items():
-        m = re.search('^(?:'+match+')$', name)
+        try:
+            m = re.fullmatch(match, name)
+        except AttributeError:
+            m = re.search('^(?:'+match+')$', name)
         if m:
             if isinstance(repl, str):
                 return repl
